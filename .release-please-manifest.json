@@ -1,0 +1,5 @@
+{
+  "packages/services/ollama": "1.0.0",
+  "packages/services/ollama-ui": "1.0.0",
+  "packages/services/rustfs": "1.0.0"
+}
