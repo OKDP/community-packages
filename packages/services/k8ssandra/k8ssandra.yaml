@@ -1,0 +1,193 @@
+#
+# Copyright 2026 The OKDP Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+
+# One Cassandra cluster (a K8ssandraCluster resource), reconciled by the
+# k8ssandra-operator package installed once on the platform.
+apiVersion: v1alpha1
+name: k8ssandra
+tag: 5.0.9-1.0.0
+protected: false
+description: |
+  Apache Cassandra® — distributed wide-column NoSQL database, deployed with K8ssandra.
+  One datacenter, authentication on, optional Reaper (repairs) and Medusa (backups to S3).
+  Needs the k8ssandra-operator package on the platform.
+usage:
+  text: |
+    {{- $secret := .Parameters.superuserSecret | default (printf "%s-superuser" .Release.metadata.name) -}}
+    Apache Cassandra {{ .Parameters.serverVersion }}, {{ .Parameters.size }} node(s).
+    CQL endpoint : {{ .Release.metadata.name }}-{{ .Parameters.datacenterName }}-service.{{ .Release.spec.targetNamespace }}.svc.cluster.local:9042
+    Superuser    : Secret {{ $secret }} (keys: username, password)
+
+    The first start takes a few minutes. Open a CQL shell with:
+      kubectl -n {{ .Release.spec.targetNamespace }} exec -it {{ .Release.metadata.name }}-{{ .Parameters.datacenterName }}-default-sts-0 -c cassandra -- \
+        cqlsh -u "$(kubectl -n {{ .Release.spec.targetNamespace }} get secret {{ $secret }} -o jsonpath='{.data.username}' | base64 -d)" \
+              -p "$(kubectl -n {{ .Release.spec.targetNamespace }} get secret {{ $secret }} -o jsonpath='{.data.password}' | base64 -d)"
+    {{- if .Parameters.reaperEnabled }}
+
+    Reaper (repairs): https://{{ trimPrefix (printf "%s-" .Release.spec.targetNamespace) .Release.metadata.name }}-{{ .Release.spec.targetNamespace }}-reaper.{{ .Context.ingress.suffix }}/webui/
+      Login: Secret {{ .Release.metadata.name }}-reaper-ui (keys: username, password)
+    {{- end }}
+    {{- if .Parameters.backupEnabled }}
+
+    Backups (Medusa) go to bucket {{ .Parameters.backupBucket }}{{ with .Parameters.backupSchedule }}, on schedule "{{ . }}"{{ end }}.
+      List them:  kubectl -n {{ .Release.spec.targetNamespace }} get medusabackup
+      Take one:   create a MedusaBackupJob (spec.cassandraDatacenter: {{ .Parameters.datacenterName }})
+      Restore:    create a MedusaRestoreJob (spec.cassandraDatacenter: {{ .Parameters.datacenterName }}, spec.backup: <name>)
+    {{- end }}
+
+schema:
+  parameters:
+    properties:
+      serverVersion:
+        type: string
+        default: "5.0.9"
+        description: "Cassandra version. Upgrading is supported, downgrading is not."
+        enum:
+          - "5.0.9"
+          - "4.1.12"
+      size:
+        type: integer
+        default: 1
+        minimum: 1
+        description: "Number of Cassandra nodes. Use 3 or more for a replication factor of 3."
+      datacenterName:
+        type: string
+        default: "dc1"
+        description: "Datacenter name, used in keyspace replication settings (NetworkTopologyStrategy). Cannot be changed after the first install."
+      cpu:
+        type: number
+        default: 1
+        multipleOf: 0.25
+        description: "CPU request of each Cassandra node (vCPU). The limit is set to twice this value."
+      memoryGi:
+        type: number
+        default: 4
+        multipleOf: 0.25
+        description: "Memory allocated to each Cassandra node (GiB). Half of it goes to the JVM heap, the rest to off-heap structures and the page cache. Cassandra 5 needs at least 2 GiB."
+      storageGi:
+        type: integer
+        default: 10
+        description: "Persistent volume size of each Cassandra node (GiB)"
+      softPodAntiAffinity:
+        type: boolean
+        default: false
+        description: "Allow several Cassandra nodes on the same Kubernetes node. Needed when size exceeds the number of worker nodes, e.g. in a single-node sandbox."
+      superuserSecret:
+        type: string
+        default: ""
+        description: "Existing Secret (keys: username, password) holding the superuser credentials. Empty lets the operator generate <release>-superuser with a random password."
+      # Stargate is not offered: deprecated upstream, and it has no image for
+      # Cassandra 4.1 or 5.0.
+      reaperEnabled:
+        type: boolean
+        default: false
+        description: "Deploy Reaper, which schedules and runs anti-entropy repairs, with its web UI. Keeps its state in this cluster."
+      backupEnabled:
+        type: boolean
+        default: false
+        description: "Deploy Medusa, the backup and restore sidecar, in every Cassandra node."
+      backupStore:
+        type: connectionRef
+        contract: s3
+        description: "Object store receiving the backups. Read only when backupEnabled is true."
+      backupSecretRef:
+        type: string
+        default: ""
+        description: "Secret with keys accessKey/secretKey, this cluster's own S3 identity on the backup store. It must exist before the first install with backups on."
+      backupBucket:
+        type: string
+        default: "cassandra-backups"
+        description: "Bucket receiving the backups. It must exist on the store."
+      backupSchedule:
+        type: string
+        default: ""
+        description: "Cron schedule of the backups, e.g. '0 2 * * *'. Empty takes no scheduled backup: create a MedusaBackupJob to take one."
+  context:
+    properties:
+      storageClass:
+        required: true
+        properties:
+          data: { type: string, required: true }
+      ingress:
+        required: true
+        properties:
+          suffix: { type: string, required: true }
+      certificateIssuers:
+        required: true
+        properties:
+          selfSigned:
+            properties:
+              name: { type: string, required: true }
+
+modules:
+  - name: main
+    timeout: 20m
+    source:
+      local:
+        path: ../../../charts/k8ssandra-cluster
+    values: |
+      {{- $ns := .Release.spec.targetNamespace -}}
+      {{- $base := trimPrefix (printf "%s-" $ns) .Release.metadata.name -}}
+      name: {{ .Release.metadata.name }}
+      serverVersion: "{{ .Parameters.serverVersion }}"
+      datacenter:
+        name: "{{ .Parameters.datacenterName }}"
+        size: {{ .Parameters.size }}
+      storage:
+        className: "{{ .Context.storageClass.data }}"
+        size: "{{ .Parameters.storageGi }}Gi"
+      resources:
+        requests:
+          cpu: "{{ .Parameters.cpu }}"
+          memory: "{{ .Parameters.memoryGi }}Gi"
+        limits:
+          cpu: "{{ mulf (float64 .Parameters.cpu) 2 }}"
+          memory: "{{ .Parameters.memoryGi }}Gi"
+      # Half the container memory, in MiB so a fractional memoryGi stays exact.
+      heapSize: "{{ mulf (float64 .Parameters.memoryGi) 512 | int }}M"
+      softPodAntiAffinity: {{ .Parameters.softPodAntiAffinity }}
+      superuserSecret: "{{ .Parameters.superuserSecret }}"
+
+      reaper:
+        enabled: {{ .Parameters.reaperEnabled }}
+        ingress:
+          host: "{{ $base }}-{{ $ns }}-reaper.{{ .Context.ingress.suffix }}"
+          clusterIssuer: "{{ .Context.certificateIssuers.selfSigned.name }}"
+
+      {{- if .Parameters.backupEnabled }}
+      {{- if not .Parameters.backupStore }}
+      {{- fail "backupStore is required when backupEnabled is true" }}
+      {{- end }}
+      {{- /* In-cluster endpoint when the store publishes one: no TLS to trust, no
+             ingress body-size limit on multi-GiB SSTables. */ -}}
+      {{- $url := urlParse (.Parameters.backupStore.internalUrl | default .Parameters.backupStore.apiUrl) -}}
+      {{- $secure := eq $url.scheme "https" -}}
+      {{- $hostPort := splitList ":" $url.host }}
+      medusa:
+        enabled: true
+        bucket: "{{ .Parameters.backupBucket }}"
+        host: "{{ first $hostPort }}"
+        port: {{ if gt (len $hostPort) 1 }}{{ last $hostPort }}{{ else if $secure }}443{{ else }}80{{ end }}
+        secure: {{ $secure }}
+        region: "{{ .Parameters.backupStore.region | default "us-east-1" }}"
+        credentialsSecret: "{{ .Parameters.backupSecretRef }}"
+        schedule: "{{ .Parameters.backupSchedule }}"
+      {{- end }}
+
+roles:
+  - cassandra
+dependencies:
+  - cassandra-operator

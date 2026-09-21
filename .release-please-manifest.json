@@ -1,5 +1,7 @@
 {
+  "packages/services/k8ssandra": "1.0.0",
   "packages/services/ollama": "1.0.0",
   "packages/services/ollama-ui": "1.0.0",
-  "packages/services/rustfs": "1.0.0"
+  "packages/services/rustfs": "1.0.0",
+  "packages/system/k8ssandra-operator": "1.0.0"
 }

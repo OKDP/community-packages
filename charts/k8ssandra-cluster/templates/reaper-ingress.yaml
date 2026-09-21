@@ -1,0 +1,30 @@
+{{- if and .Values.reaper.enabled .Values.reaper.ingress.host }}
+{{- $name := .Values.name | default .Release.Name -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}-reaper
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.reaper.ingress.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.reaper.ingress.className }}
+  rules:
+    - host: {{ .Values.reaper.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # Created by the operator, one per datacenter.
+                name: {{ $name }}-{{ .Values.datacenter.name }}-reaper-service
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - {{ .Values.reaper.ingress.host }}
+      secretName: {{ $name }}-reaper-tls
+{{- end }}

@@ -15,15 +15,22 @@ artifacts. Deployment (releases, contexts) belongs to the consuming environment,
 | [`rustfs`](./packages/services/rustfs/rustfs.yaml) | S3-compatible object storage | Binds the OKDP `defaultStorage` provider contract |
 | [`ollama`](./packages/services/ollama/ollama.yaml) | Local LLM inference server | CPU mode, no GPU; the model is a parameter |
 | [`ollama-ui`](./packages/services/ollama-ui/ollama-ui.yaml) | Chat interface for `ollama` | Points at an `ollama` release in the same project |
+| [`k8ssandra-operator`](./packages/system/k8ssandra-operator/k8ssandra-operator.yaml) | K8ssandra operator (Cassandra) | Installed once per platform, watches every namespace; needs cert-manager |
+| [`k8ssandra`](./packages/services/k8ssandra/k8ssandra.yaml) | Apache Cassandra cluster | One datacenter, auth on; optional Reaper (repairs) and Medusa (backups to an `s3` Connection); needs `k8ssandra-operator` |
 
 ## Structure
 
 ```
 packages/
+├── system/                    # platform-wide, installed once (operators)
+│   └── k8ssandra-operator/
 └── services/
+    ├── k8ssandra/
     ├── ollama/
     ├── ollama-ui/
     └── rustfs/
+charts/
+└── k8ssandra-cluster/         # local chart, the K8ssandraCluster deployed by k8ssandra
 community-packages-values.yaml # OCI publish target (packageRepository), read by CI
 ```
 

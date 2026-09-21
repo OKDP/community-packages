@@ -1,0 +1,37 @@
+{{- if .Values.medusa.enabled }}
+{{- $name := .Values.name | default .Release.Name -}}
+{{- $src := required "medusa.credentialsSecret is required" .Values.medusa.credentialsSecret -}}
+{{- /* Medusa reads an AWS credentials file, the platform hands out accessKey and
+       secretKey: rewrite one into the other. lookup reads the live cluster, so a
+       rotated key is picked up on the next upgrade, not before. */ -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $src -}}
+{{- if not $secret }}
+{{- fail (printf "Secret %s/%s not found: it must exist before Medusa is enabled" .Release.Namespace $src) }}
+{{- end }}
+{{- $ak := required (printf "Secret %s has no accessKey" $src) (index $secret.data "accessKey") | b64dec -}}
+{{- $sk := required (printf "Secret %s has no secretKey" $src) (index $secret.data "secretKey") | b64dec -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-medusa-bucket-key
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+stringData:
+  credentials: |
+    [default]
+    aws_access_key_id = {{ $ak }}
+    aws_secret_access_key = {{ $sk }}
+{{- with .Values.medusa.schedule }}
+---
+apiVersion: medusa.k8ssandra.io/v1alpha1
+kind: MedusaBackupSchedule
+metadata:
+  name: {{ $name }}-backups
+  namespace: {{ $.Release.Namespace }}
+spec:
+  cronSchedule: {{ . | quote }}
+  backupSpec:
+    cassandraDatacenter: {{ $.Values.datacenter.name }}
+    backupType: {{ $.Values.medusa.backupType }}
+{{- end }}
+{{- end }}

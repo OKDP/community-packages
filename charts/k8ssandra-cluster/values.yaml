@@ -1,0 +1,49 @@
+# Name of the K8ssandraCluster, also the Cassandra cluster name. Defaults to the
+# Helm release name.
+name: ""
+# Cassandra version, X.Y.Z. Must be one the operator supports.
+serverVersion: "5.0.9"
+datacenter:
+  name: dc1
+  # Number of Cassandra nodes.
+  size: 1
+storage:
+  className: ""
+  size: 10Gi
+# Cassandra container resources.
+resources: {}
+# JVM heap, initial and max (e.g. 2048M). Empty leaves it to Cassandra.
+heapSize: ""
+# Allow several Cassandra nodes on the same Kubernetes node.
+softPodAntiAffinity: false
+# Existing Secret (keys: username, password) for the superuser. Empty lets the
+# operator generate <name>-superuser.
+superuserSecret: ""
+
+# Reaper: schedules and runs anti-entropy repairs, one instance per datacenter.
+reaper:
+  enabled: false
+  # Ingress for the Reaper web UI. No host, no ingress.
+  ingress:
+    host: ""
+    className: nginx
+    # cert-manager ClusterIssuer signing the TLS certificate.
+    clusterIssuer: ""
+
+# Medusa: backup and restore sidecar in every Cassandra pod, to an
+# S3-compatible object store.
+medusa:
+  enabled: false
+  bucket: ""
+  host: ""
+  port: 443
+  secure: true
+  region: us-east-1
+  # Existing Secret (keys: accessKey, secretKey) holding the S3 identity.
+  # Medusa wants an AWS credentials file instead: the chart writes one to
+  # <name>-medusa-bucket-key at install and upgrade.
+  credentialsSecret: ""
+  # Cron schedule of the backups (e.g. "0 2 * * *"). Empty: no schedule,
+  # backups are taken on demand with a MedusaBackupJob.
+  schedule: ""
+  backupType: differential

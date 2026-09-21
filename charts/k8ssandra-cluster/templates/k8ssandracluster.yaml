@@ -1,0 +1,59 @@
+{{- $name := .Values.name | default .Release.Name -}}
+apiVersion: k8ssandra.io/v1alpha1
+kind: K8ssandraCluster
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  auth: true
+  cassandra:
+    # Apache Cassandra only. Pinned, not a value: DSE and HCD are commercial
+    # DataStax distributions, and the image is picked from this type.
+    serverType: cassandra
+    serverVersion: {{ .Values.serverVersion | quote }}
+    softPodAntiAffinity: {{ .Values.softPodAntiAffinity }}
+    {{- with .Values.superuserSecret }}
+    superuserSecretRef:
+      name: {{ . }}
+    {{- end }}
+    {{- with .Values.resources }}
+    resources:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.heapSize }}
+    config:
+      jvmOptions:
+        heap_initial_size: {{ . }}
+        heap_max_size: {{ . }}
+    {{- end }}
+    storageConfig:
+      cassandraDataVolumeClaimSpec:
+        {{- with .Values.storage.className }}
+        storageClassName: {{ . }}
+        {{- end }}
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.storage.size }}
+    datacenters:
+      - metadata:
+          name: {{ .Values.datacenter.name }}
+        size: {{ .Values.datacenter.size }}
+  {{- if .Values.reaper.enabled }}
+  # Defaults: one Reaper per datacenter, keeping its state in this cluster.
+  reaper: {}
+  {{- end }}
+  {{- if .Values.medusa.enabled }}
+  medusa:
+    storageProperties:
+      storageProvider: s3_compatible
+      credentialsType: credential-based
+      storageSecretRef:
+        name: {{ $name }}-medusa-bucket-key
+      bucketName: {{ required "medusa.bucket is required" .Values.medusa.bucket | quote }}
+      host: {{ required "medusa.host is required" .Values.medusa.host | quote }}
+      port: {{ .Values.medusa.port }}
+      secure: {{ .Values.medusa.secure }}
+      region: {{ .Values.medusa.region | quote }}
+  {{- end }}
