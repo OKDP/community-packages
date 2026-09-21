@@ -42,6 +42,7 @@ schema:
       caBundleSecret: { title: "Storage | CA bundle Secret | | order:3 advanced:true", type: string, required: true, default: "certs-bundle", description: "Secret holding ca.crt, trusted by the server when it calls the OIDC issuer." }
       mcImage: { title: "Storage | Provisioning image | | order:2 columns:2 advanced:true", type: string, required: true, default: "minio/mc:latest" }
       memoryGi: { title: "Storage | Memory limit (GiB) | | order:4 columns:2 advanced:true", type: number, default: 2, multipleOf: 0.25, description: "Memory limit of the server container. The chart ships with no cap at all by default." }
+      cpu: { title: "Storage | CPU request (vCPU) | | order:5 columns:2 advanced:true", type: number, default: 0.25, multipleOf: 0.25, description: "CPU request for the server container. The limit is set to twice this value." }
       # S3 identities of the store, one entry per principal. actions are the
       # neutral verbs (read, list, write, admin), scoped to buckets when
       # buckets is set. sts marks a principal that needs full admin rights.
@@ -239,10 +240,10 @@ modules:
       replicaCount: 1
       resources:
         requests:
-          cpu: "250m"
+          cpu: "{{ .Parameters.cpu }}"
           memory: "512Mi"
         limits:
-          cpu: "2000m"
+          cpu: "{{ mulf (float64 .Parameters.cpu) 2 }}"
           memory: "{{ .Parameters.memoryGi }}Gi"
       storageclass:
         name: "{{ .Context.storageClass.data }}"
