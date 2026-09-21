@@ -33,6 +33,16 @@ schema:
         type: integer
         default: 2
         description: "Persistent volume size for conversations, settings and user data (GiB)"
+      cpu:
+        type: number
+        default: 0.25
+        multipleOf: 0.25
+        description: "CPU request for the Open WebUI pod (vCPU). The limit is set to twice this value."
+      memoryGi:
+        type: number
+        default: 2
+        multipleOf: 0.25
+        description: "Memory allocated to the Open WebUI pod (GiB). Needs at least 2 GiB: it loads a local sentence-transformers embedding model (~600 MiB resident) alongside the backend at startup."
       oidcAllowedRoles:
         type: string
         default: "data_engineer,data_scientist,business_analyst,data_steward,auditor,platform_admin"
@@ -237,11 +247,13 @@ modules:
 
       # Open WebUI loads a local sentence-transformers embedding model (all-MiniLM-L6-v2, ~600MB
       # resident) on top of the backend at startup → it OOMKills (exit 137) under a 1Gi limit,
-      # crash-looping. The model is cached on the data PVC (/app/backend/data), so 2Gi lets it load
-      # once and run stably. (To drop the local model entirely instead, set RAG_EMBEDDING_ENGINE=ollama.)
+      # crash-looping. The model is cached on the data PVC (/app/backend/data), so the memoryGi
+      # default of 2 lets it load once and run stably. (To drop the local model entirely instead,
+      # set RAG_EMBEDDING_ENGINE=ollama.)
       resources:
         requests:
-          cpu: "200m"
-          memory: "1Gi"
+          cpu: "{{ .Parameters.cpu }}"
+          memory: "{{ .Parameters.memoryGi }}Gi"
         limits:
-          memory: "2Gi"
+          cpu: "{{ mulf (float64 .Parameters.cpu) 2 }}"
+          memory: "{{ .Parameters.memoryGi }}Gi"

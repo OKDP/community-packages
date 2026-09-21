@@ -45,6 +45,11 @@ schema:
         enum:
           - "nvidia"
           - "amd"
+      cpu:
+        type: number
+        default: 0.5
+        multipleOf: 0.25
+        description: "CPU request for the Ollama pod (vCPU). The limit is set to twice this value."
       memoryGi:
         type: number
         default: 8
@@ -94,9 +99,10 @@ modules:
 
       resources:
         requests:
-          cpu: "500m"
+          cpu: "{{ .Parameters.cpu }}"
           memory: "{{ .Parameters.memoryGi }}Gi"
         limits:
+          cpu: "{{ mulf (float64 .Parameters.cpu) 2 }}"
           memory: "{{ .Parameters.memoryGi }}Gi"
 
       readinessProbe:
