@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": false,
+  "include-v-in-tag": true,
+  "draft-pull-request": true,
+  "packages": {
+    "packages/services/ollama": {
+      "component": "ollama",
+      "release-type": "simple",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/services/ollama-ui": {
+      "component": "ollama-ui",
+      "release-type": "simple",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/services/rustfs": {
+      "component": "rustfs",
+      "release-type": "simple",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
+    }
+  },
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation",
+      "hidden": false
+    },
+    {
+      "type": "refactor",
+      "section": "Refactoring",
+      "hidden": false
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "Continuous Integration",
+      "hidden": true
+    }
+  ]
+}
