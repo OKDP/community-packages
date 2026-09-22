@@ -1,0 +1,9 @@
+apiVersion: v2
+name: hop
+version: 0.1.0
+appVersion: "2.19.0"
+description: >-
+  Apache Hop: Hop Server, the long-lived engine that runs pipelines and
+  workflows remotely, and Hop Web, the browser designer, pre-wired to that
+  server. Hop Web has no authentication of its own: an oauth2-proxy sidecar
+  guards it. Used by the hop package.

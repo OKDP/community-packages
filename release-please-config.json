@@ -4,6 +4,13 @@
   "include-v-in-tag": true,
   "draft-pull-request": true,
   "packages": {
+    "packages/services/hop": {
+      "component": "hop",
+      "release-type": "simple",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/services/ollama": {
       "component": "ollama",
       "release-type": "simple",

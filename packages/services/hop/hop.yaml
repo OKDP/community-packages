@@ -1,0 +1,209 @@
+#
+# Copyright 2026 The OKDP Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+
+# Apache Hop ships no published chart (the one in its source tree is pinned to
+# 2.6), hence the local chart. Upstream half of the tag: the apache/hop and
+# apache/hop-web image version, set in the chart's values.
+apiVersion: v1alpha1
+name: hop
+tag: 2.19.0-1.0.0
+protected: false
+description: |
+  Apache Hop — visual data orchestration: design pipelines and workflows in the browser (Hop Web), run them on a long-lived Hop Server.
+  Hop Web comes pre-wired to the server of the same instance. Its sessions are shared: every user who signs in edits the same projects.
+usage:
+  text: |
+    {{- $ns := .Release.spec.targetNamespace -}}
+    {{- $release := .Release.metadata.name -}}
+    {{- $base := printf "%s-%s" (trimPrefix (printf "%s-" $ns) $release) $ns -}}
+    {{- $secret := .Parameters.credentialsSecret | default (printf "%s-credentials" $release) -}}
+    {{- $oidcEnabled := true -}}
+    {{- if hasKey .Context.oidc "enabled" }}{{- $oidcEnabled = .Context.oidc.enabled -}}{{ end -}}
+    {{- if .Parameters.webEnabled }}
+    Hop Web     : https://{{ $base }}.{{ .Context.ingress.suffix }}/ui ({{ if $oidcEnabled }}platform sign-in{{ else }}basic auth, credentials below{{ end }})
+    {{- end }}
+    {{- if .Parameters.serverEnabled }}
+    Hop Server  : https://{{ $base }}-server.{{ .Context.ingress.suffix }}/hop/status
+    In-cluster  : http://{{ $release }}-server.{{ $ns }}.svc.cluster.local:8080
+    {{- end }}
+    Credentials : Secret {{ $secret }} (keys username, password)
+    {{- if and .Parameters.webEnabled .Parameters.serverEnabled }}
+
+    In Hop Web, the default project holds a "hop-server" entry and a "remote"
+    run configuration for pipelines and workflows: pick it to run on the server.
+    {{- end }}
+
+schema:
+  parameters:
+    properties:
+      serverEnabled: { title: "Server | Deploy Hop Server | | order:1", type: boolean, default: true, description: "Long-lived engine running pipelines and workflows sent to it over HTTP." }
+      serverCpu: { title: "Server | CPU request (vCPU) | | order:2 columns:2", type: number, default: 0.5, multipleOf: 0.25, description: "CPU request for Hop Server. The limit is set to twice this value." }
+      serverMemoryGi: { title: "Server | Memory (GiB) | | order:3 columns:2", type: number, default: 2, multipleOf: 0.25, description: "Memory allocated to Hop Server (GiB). The JVM heap takes 75% of it; size it after the rows the pipelines keep in memory (sorts, lookups)." }
+      serverStorageGi: { title: "Server | Files volume (GiB) | | order:4 columns:2 advanced:true", type: integer, default: 5, description: "Persistent volume mounted on /files, for the files the pipelines run by the server read and write (GiB)" }
+      webEnabled: { title: "Web | Deploy Hop Web | | order:1", type: boolean, default: true, description: "Browser designer for pipelines and workflows." }
+      webCpu: { title: "Web | CPU request (vCPU) | | order:2 columns:2", type: number, default: 0.5, multipleOf: 0.25, description: "CPU request for Hop Web. The limit is set to twice this value." }
+      webMemoryGi: { title: "Web | Memory (GiB) | | order:3 columns:2", type: number, default: 2, multipleOf: 0.25, description: "Memory allocated to Hop Web (GiB). It needs about 1 GiB idle, and runs locally the pipelines started with the 'local' run configuration." }
+      webStorageGi: { title: "Web | Projects volume (GiB) | | order:4 columns:2 advanced:true", type: integer, default: 5, description: "Persistent volume holding the Hop configuration, the projects and the execution audit (GiB)" }
+      serverUser: { title: "Access | Server username | | order:1 columns:2", type: string, default: "admin", description: "Username of the generated credentials. Ignored with credentialsSecret." }
+      credentialsSecret: { title: "Access | Credentials Secret | | order:2 columns:2 advanced:true", type: string, default: "", description: "Existing Secret (keys username, password) for Hop Server, and for Hop Web when SSO is off. Empty generates <release>-credentials once, kept across upgrades." }
+      oidcAllowedRoles: { title: "Access | Allowed roles | | order:3", type: string, default: "data_engineer,data_scientist,platform_admin", description: "Comma-separated claim values allowed to sign in to Hop Web. Empty lets in every user of the provider." }
+      oidcRolesClaim: { title: "Access | Roles claim | | order:4 advanced:true", type: string, default: "groups", description: "Token claim carrying the values matched against the allowed roles" }
+      caBundleSecret: { title: "Access | CA bundle Secret | | order:5 advanced:true", type: string, default: "certs-bundle", description: "Secret holding ca.crt, trusted when the sign-in proxy calls the OIDC issuer" }
+  context:
+    properties:
+      oidc:
+        required: true
+        properties:
+          issuerUri: { type: string, required: true }
+          enabled: { type: boolean, default: true }
+          scope: { type: string, default: "openid profile email groups" }
+          usePKCE: { type: boolean, default: true }
+          clientProvisioning: { type: string, default: existing }
+          # Read only when clientProvisioning is dcr.
+          dcr:
+            properties:
+              registrationUrl: { type: string }
+              authMethod: { type: string }
+      certificateIssuers:
+        required: true
+        properties:
+          selfSigned:
+            properties:
+              name: { type: string, required: true }
+      ingress:
+        required: true
+        properties:
+          suffix: { type: string, required: true }
+      storageClass:
+        required: true
+        properties:
+          workspace: { type: string, required: true }
+
+modules:
+  # Registers the OIDC client of Hop Web through anonymous Dynamic Client
+  # Registration. Active only when the platform provisions clients that way;
+  # the credentials land in a Secret carrying the same keys the proxy reads.
+  - name: oidc-dcr
+    # toString, not default: `false | default true` is true, sprig treats false as empty.
+    enabled: '{{ and .Parameters.webEnabled (ne (.Context.oidc.enabled | toString) "false") (eq (.Context.oidc.clientProvisioning | default "existing") "dcr") }}'
+    timeout: 10m
+    source:
+      oci:
+        repository: quay.io/adaltas/oidc-dcr
+        tag: 0.3.2
+    values: |
+      {{- $ns := printf "%v" .Release.spec.targetNamespace -}}
+      {{- $release := printf "%v" .Release.metadata.name -}}
+      {{- $base := trimPrefix (printf "%s-" $ns) $release -}}
+      {{- $host := printf "%s-%s.%s" $base $ns .Context.ingress.suffix -}}
+      {{- $caSecret := .Parameters.caBundleSecret | default "certs-bundle" -}}
+      {{- $dcr := .Context.oidc.dcr | default dict -}}
+      {{- /* The mode is tested again here: values are rendered even when the module is disabled. */ -}}
+      {{- if and (eq (.Context.oidc.clientProvisioning | default "existing") "dcr") (ne ($dcr.authMethod | default "") "anonymous") }}
+      {{- fail (printf "oidc.dcr.authMethod %q is not supported: this package registers anonymously" ($dcr.authMethod | default "")) }}
+      {{- end }}
+
+      ttl_seconds: 30
+      registration_url: {{ $dcr.registrationUrl | quote }}
+      request:
+        application_type: web
+        client_name: "{{ $base }}-{{ $ns }}"
+        redirect_uris:
+          - "https://{{ $host }}/oauth2/callback"
+        grant_types:
+          - "authorization_code"
+          - "refresh_token"
+        scope: {{ without (splitList " " (.Context.oidc.scope | default "openid profile email groups")) "openid" | join " " | quote }}
+      tls:
+        insecure: false
+        certificate: "{{ $caSecret }}"
+      secret: "{{ $release }}-{{ $ns }}-dcr"
+      mapping:
+        use_default: false
+        key_mapping:
+          client_id: ".client_id"
+          client_secret: ".client_secret"
+
+  - name: main
+    timeout: 10m
+    source:
+      local:
+        path: ../../../charts/hop
+    values: |
+      {{- /* Host convention is <release without its project prefix>-<project>: the
+             console prefixes instances with their project, which would double it. */ -}}
+      {{- $ns := .Release.spec.targetNamespace -}}
+      {{- $base := printf "%s-%s" (trimPrefix (printf "%s-" $ns) .Release.metadata.name) $ns -}}
+      {{- $oidcEnabled := true -}}
+      {{- if hasKey .Context.oidc "enabled" }}{{- $oidcEnabled = .Context.oidc.enabled -}}{{ end -}}
+      {{- /* In dcr mode the registration job writes the credentials, under the same keys. */ -}}
+      {{- $oauthSecret := printf "creds-%s-oauth2" .Release.metadata.name -}}
+      {{- if eq (.Context.oidc.clientProvisioning | default "existing") "dcr" -}}
+      {{- $oauthSecret = printf "%s-%s-dcr" .Release.metadata.name $ns -}}
+      {{- end -}}
+      {{- $allowedRoles := list -}}
+      {{- range (splitList "," (.Parameters.oidcAllowedRoles | default "")) }}{{- with trim . }}{{- $allowedRoles = append $allowedRoles . -}}{{- end }}{{- end -}}
+      name: {{ .Release.metadata.name }}
+
+      credentials:
+        existingSecret: "{{ .Parameters.credentialsSecret }}"
+        username: "{{ .Parameters.serverUser }}"
+
+      server:
+        enabled: {{ .Parameters.serverEnabled }}
+        resources:
+          requests:
+            cpu: "{{ .Parameters.serverCpu }}"
+            memory: "{{ .Parameters.serverMemoryGi }}Gi"
+          limits:
+            cpu: "{{ mulf (float64 .Parameters.serverCpu) 2 }}"
+            memory: "{{ .Parameters.serverMemoryGi }}Gi"
+        persistence:
+          className: "{{ .Context.storageClass.workspace }}"
+          size: "{{ .Parameters.serverStorageGi }}Gi"
+        ingress:
+          host: {{ $base }}-server.{{ .Context.ingress.suffix }}
+
+      web:
+        enabled: {{ .Parameters.webEnabled }}
+        resources:
+          requests:
+            cpu: "{{ .Parameters.webCpu }}"
+            memory: "{{ .Parameters.webMemoryGi }}Gi"
+          limits:
+            cpu: "{{ mulf (float64 .Parameters.webCpu) 2 }}"
+            memory: "{{ .Parameters.webMemoryGi }}Gi"
+        persistence:
+          className: "{{ .Context.storageClass.workspace }}"
+          size: "{{ .Parameters.webStorageGi }}Gi"
+        ingress:
+          host: {{ $base }}.{{ .Context.ingress.suffix }}
+
+      ingress:
+        className: nginx
+        clusterIssuer: "{{ .Context.certificateIssuers.selfSigned.name }}"
+
+      oidc:
+        enabled: {{ $oidcEnabled }}
+        {{- if $oidcEnabled }}
+        issuerUri: "{{ .Context.oidc.issuerUri }}"
+        clientSecret: {{ $oauthSecret }}
+        scope: "{{ .Context.oidc.scope | default "openid profile email groups" }}"
+        usePKCE: {{ if hasKey .Context.oidc "usePKCE" }}{{ .Context.oidc.usePKCE }}{{ else }}true{{ end }}
+        rolesClaim: "{{ .Parameters.oidcRolesClaim }}"
+        allowedRoles: {{ $allowedRoles | toJson }}
+        caSecret: "{{ .Parameters.caBundleSecret | default "certs-bundle" }}"
+        {{- end }}

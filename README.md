@@ -13,6 +13,7 @@ artifacts. Deployment (releases, contexts) belongs to the consuming environment,
 | Package | Role | Notes |
 |---|---|---|
 | [`rustfs`](./packages/services/rustfs/rustfs.yaml) | S3-compatible object storage | Binds the OKDP `defaultStorage` provider contract |
+| [`hop`](./packages/services/hop/hop.yaml) | Data orchestration: Hop Server + Hop Web | Hop Web behind an SSO proxy, pre-wired to the server |
 | [`ollama`](./packages/services/ollama/ollama.yaml) | Local LLM inference server | CPU mode, no GPU; the model is a parameter |
 | [`ollama-ui`](./packages/services/ollama-ui/ollama-ui.yaml) | Chat interface for `ollama` | Points at an `ollama` release in the same project |
 
@@ -21,9 +22,12 @@ artifacts. Deployment (releases, contexts) belongs to the consuming environment,
 ```
 packages/
 └── services/
+    ├── hop/
     ├── ollama/
     ├── ollama-ui/
     └── rustfs/
+charts/
+└── hop/                       # local chart, used by hop (no published upstream chart)
 community-packages-values.yaml # OCI publish target (packageRepository), read by CI
 ```
 

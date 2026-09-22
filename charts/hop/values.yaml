@@ -1,0 +1,68 @@
+# Base name of every resource. Defaults to the Helm release name.
+name: ""
+
+# Shared by Hop Server authentication and, when OIDC is off, by the Hop Web
+# ingress basic auth.
+credentials:
+  # Existing Secret with keys username and password. Empty lets the chart
+  # generate <name>-credentials once and keep it across upgrades.
+  existingSecret: ""
+  # Username of the generated Secret.
+  username: admin
+
+server:
+  enabled: true
+  image: docker.io/apache/hop:2.19.0
+  # Replaces the image's -XX:+AggressiveHeap, which sizes the heap from the
+  # node rather than from the container limit.
+  javaOptions: "-XX:MaxRAMPercentage=75"
+  resources: {}
+  # Mounted on /files: shared files of the pipelines run by the server.
+  persistence:
+    className: ""
+    size: 5Gi
+  ingress:
+    # No host, no ingress.
+    host: ""
+
+web:
+  enabled: true
+  image: docker.io/apache/hop-web:2.19.0
+  javaOptions: "-XX:MaxRAMPercentage=75"
+  resources: {}
+  # Mounted on /data: Hop configuration, projects and execution audit.
+  persistence:
+    className: ""
+    size: 5Gi
+  ingress:
+    host: ""
+
+ingress:
+  className: nginx
+  # cert-manager ClusterIssuer signing the TLS certificates.
+  clusterIssuer: ""
+
+# Guards Hop Web with an oauth2-proxy sidecar. Off, the Hop Web ingress asks
+# for the credentials above instead.
+oidc:
+  enabled: false
+  issuerUri: ""
+  # Secret with keys client_id and client_secret.
+  clientSecret: ""
+  scope: "openid profile email groups"
+  usePKCE: true
+  # Token claim carrying the values matched against allowedRoles.
+  rolesClaim: groups
+  # Claim values allowed in. Empty lets in any user of the provider.
+  allowedRoles: []
+  # Secret holding ca.crt, trusted when the proxy calls the provider.
+  caSecret: certs-bundle
+  proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi

@@ -1,0 +1,81 @@
+{{- if .Values.web.enabled }}
+{{- $name := printf "%s-web" (include "hop.name" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-init
+  namespace: {{ .Release.Namespace }}
+data:
+  init.sh: |
+    #!/bin/bash
+    # Moves the Hop configuration onto the volume, so projects survive restarts.
+    set -euo pipefail
+    if [ ! -f /data/config/hop-config.json ]; then
+      echo ">> seeding the Hop configuration from the image"
+      mkdir -p /data/config
+      cp -a "${DEPLOYMENT_PATH}/config/." /data/config/
+    fi
+    mkdir -p /data/audit
+    {{- if .Values.server.enabled }}
+    # Points the default project at the Hop Server of this instance. The server
+    # entry is rewritten on every start so it follows the credentials; the run
+    # configurations are only created, users may tune them.
+    meta=/data/config/projects/default/metadata
+    if [ -d /data/config/projects/default ]; then
+      mkdir -p "${meta}/server" "${meta}/pipeline-run-configuration" "${meta}/workflow-run-configuration"
+      json_escape() { printf '%s' "$1" | sed -e 's/[\\"]/\\&/g'; }
+      cat > "${meta}/server/hop-server.json" <<EOF
+    {
+      "name": "hop-server",
+      "hostname": "{{ include "hop.serverService" . }}.{{ .Release.Namespace }}.svc.cluster.local",
+      "port": "8080",
+      "webAppName": "",
+      "username": "$(json_escape "${HOP_SERVER_USER}")",
+      "password": "$(json_escape "${HOP_SERVER_PASS}")",
+      "enableAuth": true,
+      "sslMode": false,
+      "proxyHostname": "",
+      "proxyPort": "",
+      "nonProxyHosts": ""
+    }
+    EOF
+      if [ ! -f "${meta}/pipeline-run-configuration/remote.json" ]; then
+        cat > "${meta}/pipeline-run-configuration/remote.json" <<'EOF'
+    {
+      "engineRunConfiguration": {
+        "Remote": {
+          "hop_server": "hop-server",
+          "run_config": "local",
+          "server_poll_delay": "1000",
+          "server_poll_interval": "2000",
+          "export_resources": false
+        }
+      },
+      "name": "remote",
+      "description": "Runs the pipeline on the Hop Server of this instance",
+      "configurationVariables": [],
+      "defaultSelection": false
+    }
+    EOF
+      fi
+      if [ ! -f "${meta}/workflow-run-configuration/remote.json" ]; then
+        cat > "${meta}/workflow-run-configuration/remote.json" <<'EOF'
+    {
+      "engineRunConfiguration": {
+        "Remote": {
+          "hop_server": "hop-server",
+          "run_config": "local",
+          "server_poll_delay": "1000",
+          "server_poll_interval": "2000",
+          "export_resources": false
+        }
+      },
+      "name": "remote",
+      "description": "Runs the workflow on the Hop Server of this instance",
+      "defaultSelection": false
+    }
+    EOF
+      fi
+    fi
+    {{- end }}
+{{- end }}

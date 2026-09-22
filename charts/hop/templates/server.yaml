@@ -1,0 +1,131 @@
+{{- if .Values.server.enabled }}
+{{- $name := include "hop.serverService" . }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-files
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.server.persistence.className }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.server.persistence.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: hop-server
+    app.kubernetes.io/instance: {{ include "hop.name" . }}
+spec:
+  # Pipelines and their logs live in the server's memory, and /files is
+  # ReadWriteOnce: one pod, never two, not even during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hop-server
+      app.kubernetes.io/instance: {{ include "hop.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hop-server
+        app.kubernetes.io/instance: {{ include "hop.name" . }}
+      annotations:
+        # The entrypoint writes the credentials into its config at startup only.
+        checksum/credentials: {{ printf "%s|%s" (include "hop.username" .) (include "hop.password" .) | sha256sum | trunc 16 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 501
+        runAsGroup: 501
+        fsGroup: 501
+      containers:
+        - name: hop-server
+          image: {{ .Values.server.image }}
+          env:
+            - { name: HOP_SERVER_PORT, value: "8080" }
+            - { name: HOP_SERVER_AUTH, value: "true" }
+            - { name: HOP_OPTIONS, value: {{ .Values.server.javaOptions | quote }} }
+            - name: HOP_SERVER_USER
+              valueFrom:
+                secretKeyRef: { name: {{ include "hop.credentialsSecret" . }}, key: username }
+            # The image declares HOP_SERVER_PASSWORD, but its entrypoint reads HOP_SERVER_PASS.
+            - name: HOP_SERVER_PASS
+              valueFrom:
+                secretKeyRef: { name: {{ include "hop.credentialsSecret" . }}, key: password }
+          ports:
+            - { name: http, containerPort: 8080 }
+          # Every HTTP endpoint asks for the credentials: probe the socket.
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          {{- with .Values.server.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - { name: files, mountPath: /files }
+      volumes:
+        - name: files
+          persistentVolumeClaim:
+            claimName: {{ $name }}-files
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app.kubernetes.io/name: hop-server
+    app.kubernetes.io/instance: {{ include "hop.name" . }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+{{- with .Values.server.ingress.host }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  annotations:
+    {{- with $.Values.ingress.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+    {{- end }}
+    # The server has nothing at the root: land on its status page.
+    nginx.ingress.kubernetes.io/app-root: /hop/status
+    # Pipelines, workflows and their exported resources are posted whole.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - host: {{ . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - {{ . }}
+      secretName: {{ $name }}-tls
+{{- end }}
+{{- end }}
