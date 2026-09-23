@@ -40,7 +40,7 @@ schema:
       rootSecretKey: { title: "Admin | Root secret key | | order:2 columns:2", type: string, required: true, minLength: 8, maxLength: 40 }
       dataStorage: { title: "Storage | Data size | | order:1 columns:2", type: string, required: true, default: "5Gi" }
       caBundleSecret: { title: "Storage | CA bundle Secret | | order:3 advanced:true", type: string, required: true, default: "certs-bundle", description: "Secret holding ca.crt, trusted by the server when it calls the OIDC issuer." }
-      mcImage: { title: "Storage | Provisioning image | | order:2 columns:2 advanced:true", type: string, required: true, default: "minio/mc:latest" }
+      mcImage: { title: "Storage | Provisioning image | | order:2 columns:2 advanced:true", type: string, required: true, default: "quay.io/minio/mc:latest" }
       memoryGi: { title: "Storage | Memory limit (GiB) | | order:4 columns:2 advanced:true", type: number, default: 2, multipleOf: 0.25, description: "Memory limit of the server container. The chart ships with no cap at all by default." }
       cpu: { title: "Storage | CPU request (vCPU) | | order:5 columns:2 advanced:true", type: number, default: 0.25, multipleOf: 0.25, description: "CPU request for the server container. The limit is set to twice this value." }
       # S3 identities of the store, one entry per principal. actions are the
