@@ -1,0 +1,83 @@
+{{- $name := .Values.name | default .Release.Name -}}
+{{- /* Replication capped by the node count, so a single-node cluster can still
+       create its internal topics. min.insync one below it tolerates a node down. */ -}}
+{{- $rf := min 3 (int .Values.nodes.replicas) -}}
+{{- $minIsr := max 1 (sub $rf 1) -}}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: node
+  namespace: {{ .Release.Namespace }}
+  labels:
+    strimzi.io/cluster: {{ $name }}
+spec:
+  replicas: {{ .Values.nodes.replicas }}
+  roles:
+    - controller
+    - broker
+  storage:
+    # jbod even with one volume: Strimzi refuses to switch storage type later.
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ .Values.nodes.storage.size }}
+        {{- with .Values.nodes.storage.className }}
+        class: {{ . }}
+        {{- end }}
+        deleteClaim: false
+        kraftMetadata: shared
+  {{- with .Values.nodes.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.nodes.heapSize }}
+  jvmOptions:
+    -Xms: {{ . }}
+    -Xmx: {{ . }}
+  {{- end }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  kafka:
+    version: {{ .Values.version | quote }}
+    # In-cluster listeners only, both SCRAM: exposing Kafka through an ingress
+    # takes TLS passthrough, which the platform ingress does not enable.
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+        authentication:
+          type: scram-sha-512
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: scram-sha-512
+    authorization:
+      type: simple
+      superUsers:
+        - {{ $name }}-admin
+    config:
+      default.replication.factor: {{ $rf }}
+      offsets.topic.replication.factor: {{ $rf }}
+      transaction.state.log.replication.factor: {{ $rf }}
+      transaction.state.log.min.isr: {{ $minIsr }}
+      min.insync.replicas: {{ $minIsr }}
+  entityOperator:
+    topicOperator:
+      {{- with .Values.entityOperator.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    userOperator:
+      {{- with .Values.entityOperator.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -15,15 +15,22 @@ artifacts. Deployment (releases, contexts) belongs to the consuming environment,
 | [`rustfs`](./packages/services/rustfs/rustfs.yaml) | S3-compatible object storage | Binds the OKDP `defaultStorage` provider contract |
 | [`ollama`](./packages/services/ollama/ollama.yaml) | Local LLM inference server | CPU mode, no GPU; the model is a parameter |
 | [`ollama-ui`](./packages/services/ollama-ui/ollama-ui.yaml) | Chat interface for `ollama` | Points at an `ollama` release in the same project |
+| [`strimzi-operator`](./packages/system/strimzi-operator/strimzi-operator.yaml) | Strimzi operator (Kafka) | Installed once per platform, watches every namespace |
+| [`strimzi`](./packages/services/strimzi/strimzi.yaml) | Apache Kafka cluster | KRaft, SCRAM auth and ACLs on, in-cluster only; topics and users as parameters; needs `strimzi-operator` |
 
 ## Structure
 
 ```
 packages/
+├── system/                    # platform-wide, installed once (operators)
+│   └── strimzi-operator/
 └── services/
     ├── ollama/
     ├── ollama-ui/
-    └── rustfs/
+    ├── rustfs/
+    └── strimzi/
+charts/
+└── strimzi-kafka/             # local chart, the Kafka cluster deployed by strimzi
 community-packages-values.yaml # OCI publish target (packageRepository), read by CI
 ```
 

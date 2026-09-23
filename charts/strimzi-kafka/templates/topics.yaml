@@ -1,0 +1,24 @@
+{{- $name := .Values.name | default .Release.Name -}}
+{{- range .Values.topics }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  # Kubernetes names are stricter than Kafka ones: the real name goes in topicName.
+  name: {{ printf "%s-%s" $name (.name | lower | replace "_" "-" | replace "." "-") | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    strimzi.io/cluster: {{ $name }}
+spec:
+  topicName: {{ .name | quote }}
+  {{- with .partitions }}
+  partitions: {{ . }}
+  {{- end }}
+  {{- with .replicas }}
+  replicas: {{ . }}
+  {{- end }}
+  {{- with .config }}
+  config:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

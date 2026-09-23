@@ -1,0 +1,44 @@
+# Name of the Kafka resource, prefix of every object Strimzi creates for it.
+# Defaults to the Helm release name.
+name: ""
+# Kafka version, X.Y.Z. Must be one the operator supports.
+version: "4.3.1"
+
+# One node pool, every node both KRaft controller and broker.
+nodes:
+  replicas: 1
+  storage:
+    className: ""
+    size: 10Gi
+  # Kafka container resources.
+  resources: {}
+  # JVM heap, initial and max (e.g. 1024m). Empty leaves it to Strimzi.
+  heapSize: ""
+
+# Topic and User Operators, one pod next to the cluster.
+entityOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Topics managed by the Topic Operator. partitions and replicas left at 0 use
+# the broker defaults (1 partition, replication factor of the cluster).
+#   - name: events
+#     partitions: 3
+#     replicas: 3
+#     config: { retention.ms: 604800000 }
+topics: []
+
+# SCRAM-SHA-512 users managed by the User Operator, named <name>-<user>, each
+# getting a Secret of that name (keys password, sasl.jaas.config). A
+# <name>-admin superuser is always created. actions are the neutral
+# verbs read, write and admin; topics are names, a trailing * matches a
+# prefix, and an empty list means every topic.
+#   - name: app
+#     topics: [events]
+#     actions: [read, write]
+users: []

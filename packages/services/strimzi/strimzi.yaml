@@ -1,0 +1,125 @@
+#
+# Copyright 2026 The OKDP Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+
+# One Kafka cluster (a Kafka resource and its node pool), reconciled by the
+# strimzi-operator package installed once on the platform. No output
+# Connection yet: the platform defines no kafka contract.
+apiVersion: v1alpha1
+name: strimzi
+tag: 4.3.1-1.0.0
+protected: false
+description: |
+  Apache Kafka® — distributed event streaming platform, deployed with Strimzi.
+  KRaft mode (no ZooKeeper), SCRAM authentication and ACLs on, topics and users declared as parameters.
+  Needs the strimzi-operator package on the platform.
+usage:
+  text: |
+    {{- $ns := .Release.spec.targetNamespace -}}
+    {{- $release := .Release.metadata.name -}}
+    Apache Kafka {{ .Parameters.kafkaVersion }}, {{ .Parameters.nodes }} node(s), in-cluster only.
+    Bootstrap   : {{ $release }}-kafka-bootstrap.{{ $ns }}.svc.cluster.local:9092 (SASL_PLAINTEXT)
+                  {{ $release }}-kafka-bootstrap.{{ $ns }}.svc.cluster.local:9093 (SASL_SSL, CA in Secret {{ $release }}-cluster-ca-cert, key ca.crt)
+    SASL        : SCRAM-SHA-512
+    Superuser   : {{ $release }}-admin, password in the Secret of the same name (key password)
+    {{- with .Parameters.users }}
+    Users       : {{ range $i, $u := . }}{{ if $i }}, {{ end }}{{ $release }}-{{ $u.name }}{{ end }}, same layout
+    {{- end }}
+
+    The first start takes a couple of minutes. List the topics with:
+      kubectl -n {{ $ns }} get kafkatopic -l strimzi.io/cluster={{ $release }}
+
+schema:
+  parameters:
+    properties:
+      kafkaVersion: { title: "Kafka | Version | | order:1 columns:2", type: string, default: "4.3.1", enum: ["4.3.1", "4.2.1"], description: "Kafka version. Upgrading is supported, downgrading is not." }
+      nodes: { title: "Kafka | Nodes | | order:2 columns:2", type: integer, default: 1, minimum: 1, description: "Number of Kafka nodes, each both KRaft controller and broker. Use 3 or more for a replication factor of 3: replication is capped by this count." }
+      cpu: { title: "Kafka | CPU request (vCPU) | | order:3 columns:2", type: number, default: 0.5, multipleOf: 0.25, description: "CPU request of each Kafka node. The limit is set to twice this value." }
+      memoryGi: { title: "Kafka | Memory (GiB) | | order:4 columns:2", type: number, default: 2, multipleOf: 0.25, description: "Memory allocated to each Kafka node (GiB). Half of it goes to the JVM heap, the rest to the page cache Kafka reads its logs through." }
+      storageGi: { title: "Kafka | Log volume (GiB) | | order:5 columns:2", type: integer, default: 10, description: "Persistent volume size of each Kafka node, holding the topic logs and the KRaft metadata (GiB). It can grow, not shrink." }
+      # Kafka topics, reconciled by the Topic Operator. partitions and replicas
+      # left out use the broker defaults: 1 partition, replication factor
+      # min(3, nodes). retentionHours left out keeps the broker default (7 days).
+      topics:
+        title: "Topics | Topics | | order:1"
+        type: array
+        items:
+          properties:
+            name: { type: string, required: true }
+            partitions: { type: integer, minimum: 1 }
+            replicas: { type: integer, minimum: 1 }
+            retentionHours: { type: integer, minimum: 1 }
+            cleanupPolicy: { type: string, default: delete, enum: [delete, compact] }
+      # SCRAM users, reconciled by the User Operator. Each one is named
+      # <release>-<name> and gets a Secret of that name. actions are the
+      # neutral verbs (read, write, admin), scoped to topics when topics is set;
+      # a trailing * matches a prefix. read also lets the user commit offsets
+      # in any consumer group.
+      users:
+        title: "Access | Users | | order:1"
+        type: array
+        items:
+          properties:
+            name: { type: string, required: true }
+            actions:
+              type: array
+              items: { type: string, enum: [read, write, admin] }
+            topics:
+              type: array
+              items: { type: string }
+  context:
+    properties:
+      storageClass:
+        required: true
+        properties:
+          data: { type: string, required: true }
+
+modules:
+  - name: main
+    timeout: 20m
+    source:
+      local:
+        path: ../../../charts/strimzi-kafka
+    values: |
+      name: {{ .Release.metadata.name }}
+      version: "{{ .Parameters.kafkaVersion }}"
+      nodes:
+        replicas: {{ .Parameters.nodes }}
+        storage:
+          className: "{{ .Context.storageClass.data }}"
+          size: "{{ .Parameters.storageGi }}Gi"
+        resources:
+          requests:
+            cpu: "{{ .Parameters.cpu }}"
+            memory: "{{ .Parameters.memoryGi }}Gi"
+          limits:
+            cpu: "{{ mulf (float64 .Parameters.cpu) 2 }}"
+            memory: "{{ .Parameters.memoryGi }}Gi"
+        # Half the container memory, in MiB so a fractional memoryGi stays exact.
+        heapSize: "{{ mulf (float64 .Parameters.memoryGi) 512 | int }}m"
+      {{- /* The chart takes raw Kafka topic configs; the schema only offers the common ones. */ -}}
+      {{- $topics := list -}}
+      {{- range (.Parameters.topics | default list) -}}
+      {{- $config := dict "cleanup.policy" (.cleanupPolicy | default "delete") -}}
+      {{- with .retentionHours }}{{ $_ := set $config "retention.ms" (mul . 3600000) }}{{ end -}}
+      {{- $topics = append $topics (dict "name" .name "partitions" (.partitions | default 0) "replicas" (.replicas | default 0) "config" $config) -}}
+      {{- end }}
+      topics: {{ $topics | toJson }}
+      users: {{ .Parameters.users | default list | toJson }}
+
+roles:
+  - kafka
+dependencies:
+  - kafka-operator

@@ -24,6 +24,20 @@
       "include-component-in-tag": true,
       "tag-separator": "/",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/services/strimzi": {
+      "component": "strimzi",
+      "release-type": "simple",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/system/strimzi-operator": {
+      "component": "strimzi-operator",
+      "release-type": "simple",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "changelog-sections": [

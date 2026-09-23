@@ -1,0 +1,6 @@
+apiVersion: v2
+name: strimzi-kafka
+version: 0.1.0
+description: >-
+  A KRaft Apache Kafka cluster, with its topics and users, reconciled by the
+  Strimzi operator installed on the platform. Used by the strimzi package.

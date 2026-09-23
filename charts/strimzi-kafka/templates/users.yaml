@@ -1,0 +1,68 @@
+{{- $name := .Values.name | default .Release.Name -}}
+{{- /* The admin identity, superuser of the cluster: no ACL to hold. */ -}}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ $name }}-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    strimzi.io/cluster: {{ $name }}
+spec:
+  authentication:
+    type: scram-sha-512
+{{- range .Values.users }}
+{{- $user := .name }}
+{{- $actions := .actions | default list }}
+{{- $topics := .topics | default (list "*") }}
+{{- range $actions }}
+{{- if not (has . (list "read" "write" "admin")) }}
+{{- fail (printf "user %s: unknown action %q, expected read, write or admin" $user .) }}
+{{- end }}
+{{- end }}
+{{- $ops := list }}
+{{- if has "admin" $actions }}
+{{- $ops = list "All" }}
+{{- else }}
+{{- if has "read" $actions }}{{ $ops = concat $ops (list "Read" "Describe") }}{{ end }}
+{{- if has "write" $actions }}{{ $ops = concat $ops (list "Write" "Describe") }}{{ end }}
+{{- end }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ $name }}-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    strimzi.io/cluster: {{ $name }}
+spec:
+  authentication:
+    type: scram-sha-512
+  {{- if $ops }}
+  authorization:
+    type: simple
+    acls:
+      {{- range $topics }}
+      - resource:
+          type: topic
+          {{- if eq . "*" }}
+          name: "*"
+          patternType: literal
+          {{- else if hasSuffix "*" . }}
+          name: {{ trimSuffix "*" . | quote }}
+          patternType: prefix
+          {{- else }}
+          name: {{ . | quote }}
+          patternType: literal
+          {{- end }}
+        operations: {{ $ops | uniq | toJson }}
+      {{- end }}
+      {{- if or (has "read" $actions) (has "admin" $actions) }}
+      # Consumers commit their offsets in a group, named by the client.
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: {{ if has "admin" $actions }}["All"]{{ else }}["Read", "Describe"]{{ end }}
+      {{- end }}
+  {{- end }}
+{{- end }}
