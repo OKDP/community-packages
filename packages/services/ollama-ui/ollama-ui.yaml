@@ -16,7 +16,7 @@
 
 apiVersion: v1alpha1
 name: ollama-ui
-tag: 16.5.0-1.0.0
+tag: 16.5.0-1.1.0
 description: |
   Open WebUI — self-hosted chat interface for Ollama.
   Connects to an existing ollama instance deployed in the same project.
