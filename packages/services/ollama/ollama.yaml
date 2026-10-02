@@ -16,7 +16,7 @@
 
 apiVersion: v1alpha1
 name: ollama
-tag: 1.62.0-1.0.0
+tag: 1.62.0-1.1.0
 description: |
   Ollama — local AI inference server for open-weight LLMs (Llama, Mistral, Gemma…).
   Serves models via a simple REST API. Runs on CPU by default, on an NVIDIA or AMD GPU when asked for one.
