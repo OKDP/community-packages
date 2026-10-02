@@ -27,11 +27,6 @@ usage:
     RustFS S3-compatible object storage.
     S3 endpoint : https://{{ $host }}-api.{{ .Context.ingress.suffix }}
     Console     : https://{{ $host }}.{{ .Context.ingress.suffix }}
-
-    First install with SSO on: the provisioning job registers the identity
-    provider after the server has started, and the admin config store is only
-    read at startup. Restart it once to activate the Keycloak button:
-      kubectl -n {{ .Release.spec.targetNamespace }} rollout restart deploy/{{ .Release.metadata.name }}
 schema:
   parameters:
     properties:
@@ -40,7 +35,7 @@ schema:
       rootSecretKey: { title: "Admin | Root secret key | | order:2 columns:2", type: string, required: true, minLength: 8, maxLength: 40 }
       dataStorage: { title: "Storage | Data size | | order:1 columns:2", type: string, required: true, default: "5Gi" }
       caBundleSecret: { title: "Storage | CA bundle Secret | | order:3 advanced:true", type: string, required: true, default: "certs-bundle", description: "Secret holding ca.crt, trusted by the server when it calls the OIDC issuer." }
-      mcImage: { title: "Storage | Provisioning image | | order:2 columns:2 advanced:true", type: string, required: true, default: "quay.io/minio/mc:latest" }
+      provisioningImage: { title: "Storage | Provisioning image | | order:2 columns:2 advanced:true", type: string, required: true, default: "docker.io/rustfs/rc:v0.1.36", description: "RustFS CLI (rc) image run by the provisioning job." }
       memoryGi: { title: "Storage | Memory limit (GiB) | | order:4 columns:2 advanced:true", type: number, default: 2, multipleOf: 0.25, description: "Memory limit of the server container. The chart ships with no cap at all by default." }
       cpu: { title: "Storage | CPU request (vCPU) | | order:5 columns:2 advanced:true", type: number, default: 0.25, multipleOf: 0.25, description: "CPU request for the server container. The limit is set to twice this value." }
       # S3 identities of the store, one entry per principal. actions are the
@@ -68,11 +63,13 @@ schema:
       # Claim carrying the policy names. Every one of its values must name an
       # existing policy or the login is refused, so point it at a claim built
       # for that purpose rather than at one carrying application roles.
-      oidcPolicyClaim: { title: "Access | OIDC policy claim | | order:4 advanced:true", type: string, required: true, default: "groups" }
+      # The defaults expect the IdP to issue storage_policies through the storage-policies scope, from storage_admin/readwrite/readonly groups.
+      oidcPolicyClaim: { title: "Access | OIDC policy claim | | order:4 advanced:true", type: string, required: true, default: "storage_policies" }
       # Requested on top of the platform scopes when the client is registered through dcr. A claim built for the store is rarely part of the default scopes, and the provider omits it unless its scope is asked for.
-      oidcPolicyScope: { title: "Access | OIDC policy scope | | order:5 advanced:true", type: string, default: "", description: "Client scope requested so the policy claim is issued. Read only when oidc.clientProvisioning is dcr." }
+      oidcPolicyScope: { title: "Access | OIDC policy scope | | order:5 advanced:true", type: string, default: "storage-policies", description: "Client scope requested so the policy claim is issued. Read only when oidc.clientProvisioning is dcr." }
       oidcPolicies:
         title: "Access | OIDC policies | | order:3"
+        description: "Empty: storage_admin (admin), storage_readwrite (read, write, list), storage_readonly (read, list)."
         type: array
         items:
           properties:
@@ -187,8 +184,12 @@ modules:
 
       {{- $grants := .Parameters.grants | default list -}}
       {{- $buckets := .Parameters.buckets | default list -}}
-      {{- $oidcPolicies := .Parameters.oidcPolicies | default list -}}
-      {{- $oidcPolicyClaim := .Parameters.oidcPolicyClaim | default "groups" -}}
+      {{- /* Arrays take no schema default, hence here. */ -}}
+      {{- $oidcPolicies := .Parameters.oidcPolicies | default (list
+            (dict "name" "storage_admin" "actions" (list "admin"))
+            (dict "name" "storage_readwrite" "actions" (list "read" "write" "list"))
+            (dict "name" "storage_readonly" "actions" (list "read" "list"))) -}}
+      {{- $oidcPolicyClaim := .Parameters.oidcPolicyClaim | default "storage_policies" -}}
 
       {{- $oidcEnabled := true -}}
       {{- if hasKey .Context.oidc "enabled" }}{{- $oidcEnabled = .Context.oidc.enabled -}}{{ end -}}
@@ -256,7 +257,30 @@ modules:
           secret_key: "{{ .Parameters.rootSecretKey }}"
 
       {{- if $oidcEnabled }}
+      # Read at startup, so the provider is live from the first boot.
       extraEnv:
+        - name: RUSTFS_IDENTITY_OPENID_CONFIG_URL
+          value: "{{ $oidcDiscoveryUrl }}"
+        - name: RUSTFS_IDENTITY_OPENID_CLIENT_ID
+          valueFrom: { secretKeyRef: { name: {{ $oauthSecret }}, key: client_id } }
+        - name: RUSTFS_IDENTITY_OPENID_CLIENT_SECRET
+          valueFrom: { secretKeyRef: { name: {{ $oauthSecret }}, key: client_secret } }
+        - name: RUSTFS_IDENTITY_OPENID_SCOPES
+          value: "{{ $oidcScopes }}"
+        - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI
+          value: "https://{{ $consoleHost }}/rustfs/admin/v3/oidc/callback/default"
+        - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC
+          value: "off"
+        - name: RUSTFS_IDENTITY_OPENID_DISPLAY_NAME
+          value: "{{ $oidcDisplayName }}"
+        - name: RUSTFS_IDENTITY_OPENID_CLAIM_NAME
+          value: "{{ $oidcPolicyClaim }}"
+        - name: RUSTFS_IDENTITY_OPENID_GROUPS_CLAIM
+          value: "{{ $oidcPolicyClaim }}"
+        - name: RUSTFS_IDENTITY_OPENID_USERNAME_CLAIM
+          value: preferred_username
+        - name: RUSTFS_IDENTITY_OPENID_EMAIL_CLAIM
+          value: email
         - name: RUSTFS_BROWSER_REDIRECT_URL
           value: "https://{{ $consoleHost }}"
         - name: RUSTFS_OUTBOUND_ALLOW_ORIGINS
@@ -272,10 +296,6 @@ modules:
       extraVolumeMounts:
         - name: cacerts
           mountPath: /cacerts
-
-      # Restart the server when the provider settings change
-      podAnnotations:
-        okdp.io/oidc-config: "{{ printf "%s|%s|%s|%s" $oidcDiscoveryUrl $oidcScopes $consoleHost $oidcPolicyClaim | sha256sum | trunc 16 }}"
       {{- end }}
 
       # The chart's own ingress targets the console port; we manage BOTH ingresses (S3 + console)
@@ -383,17 +403,17 @@ modules:
               #!/bin/sh
               set -eu
               echo ">> waiting for RustFS admin API at {{ $endpoint }} ..."
-              until mc alias set rf "{{ $endpoint }}" "$ROOT_AK" "$ROOT_SK" >/dev/null 2>&1; do sleep 3; done
+              until rc alias set rf "{{ $endpoint }}" "$ROOT_AK" "$ROOT_SK" >/dev/null 2>&1; do sleep 3; done
               echo ">> creating buckets"
               {{- range $b := $buckets }}
-              mc mb --ignore-existing rf/{{ $b.name }}
+              rc mb --ignore-existing rf/{{ $b.name }}
               {{- if $b.anonymousRead }}
-              mc anonymous set download rf/{{ $b.name }}
+              rc anonymous set download rf/{{ $b.name }}
               {{- end }}
               {{- /* S3 has no real directories: consumers that require a prefix to already exist before they write anything to it (e.g. Spark's FsHistoryProvider,
                      which fails to even start if its configured log directory is absent) need an empty marker object created for it upfront. */ -}}
               {{- range $p := ($b.paths | default list) }}
-              printf '' | mc pipe rf/{{ $b.name }}/{{ $p }}/.keep
+              printf '' | rc pipe rf/{{ $b.name }}/{{ $p }}/.keep
               {{- end }}
               {{- end }}
               echo ">> creating users + policies from grants"
@@ -403,32 +423,18 @@ modules:
               {{- $ak := printf "G_%s_AK" $g.principal }}
               {{- $sk := printf "G_%s_SK" $g.principal }}
               # grant: {{ $g.principal }}{{ if $isAdmin }} (admin/sts -> consoleAdmin){{ end }}
-              mc admin user add rf "${{ $ak }}" "${{ $sk }}"
+              rc admin user add rf "${{ $ak }}" "${{ $sk }}"
               {{- if $isAdmin }}
-              mc admin policy attach rf consoleAdmin --user "${{ $ak }}" || true
+              rc admin policy attach rf consoleAdmin --user "${{ $ak }}" || true
               {{- else }}
-              mc admin policy create rf okdp-{{ $g.principal }} /policies/policy-{{ $g.principal }}.json || true
-              mc admin policy attach rf okdp-{{ $g.principal }} --user "${{ $ak }}" || true
+              rc admin policy create rf okdp-{{ $g.principal }} /policies/policy-{{ $g.principal }}.json || true
+              rc admin policy attach rf okdp-{{ $g.principal }} --user "${{ $ak }}" || true
               {{- end }}
-              {{- end }}
-              {{- if $oidcEnabled }}
-              echo ">> registering the OIDC provider in the admin config store"
-              mc admin config set rf identity_openid \
-                enable=on \
-                config_url="{{ $oidcDiscoveryUrl }}" \
-                client_id="$OIDC_CLIENT_ID" \
-                client_secret="$OIDC_CLIENT_SECRET" \
-                scopes="{{ $oidcScopes }}" \
-                redirect_uri="https://{{ $consoleHost }}/rustfs/admin/v3/oidc/callback/default" \
-                redirect_uri_dynamic=off \
-                display_name="{{ $oidcDisplayName }}" \
-                claim_name="{{ $oidcPolicyClaim }}" groups_claim="{{ $oidcPolicyClaim }}" \
-                username_claim=preferred_username email_claim=email
               {{- end }}
               {{- if $oidcPolicies }}
               echo ">> creating OIDC policies (claim values map onto these names)"
               {{- range $p := $oidcPolicies }}
-              mc admin policy create rf {{ $p.name }} /policies/oidc-policy-{{ $p.name }}.json || true
+              rc admin policy create rf {{ $p.name }} /policies/oidc-policy-{{ $p.name }}.json || true
               {{- end }}
               {{- end }}
               echo ">> provisioning complete"
@@ -453,20 +459,16 @@ modules:
               spec:
                 restartPolicy: OnFailure
                 containers:
-                  - name: mc
-                    image: "{{ .Parameters.mcImage }}"
+                  - name: rc
+                    image: "{{ .Parameters.provisioningImage }}"
                     command: ["/bin/sh", "/scripts/provision.sh"]
                     env:
+                      - name: RC_CONFIG_DIR
+                        value: /tmp/rc
                       - name: ROOT_AK
                         valueFrom: { secretKeyRef: { name: {{ $rootSecret }}, key: RUSTFS_ACCESS_KEY } }
                       - name: ROOT_SK
                         valueFrom: { secretKeyRef: { name: {{ $rootSecret }}, key: RUSTFS_SECRET_KEY } }
-                      {{- if $oidcEnabled }}
-                      - name: OIDC_CLIENT_ID
-                        valueFrom: { secretKeyRef: { name: {{ $oauthSecret }}, key: client_id } }
-                      - name: OIDC_CLIENT_SECRET
-                        valueFrom: { secretKeyRef: { name: {{ $oauthSecret }}, key: client_secret } }
-                      {{- end }}
                       {{- range $g := $grants }}
                       - name: G_{{ $g.principal }}_AK
                         valueFrom: { secretKeyRef: { name: {{ $g.credentialsSecret.name }}, key: {{ $g.credentialsSecret.accessKeyKey }} } }
