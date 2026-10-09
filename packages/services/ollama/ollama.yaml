@@ -70,6 +70,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, default: nginx }
       storageClass:
         required: true
         properties:
@@ -121,7 +122,7 @@ modules:
 
       ingress:
         enabled: true
-        className: nginx
+        className: {{ .Context.ingress.className | default "nginx" }}
         annotations:
           cert-manager.io/cluster-issuer: "{{ .Context.certificateIssuers.selfSigned.name }}"
         hosts:
