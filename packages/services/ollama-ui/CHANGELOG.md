@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/OKDP/community-packages/compare/ollama-ui/v1.1.0...ollama-ui/v1.1.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* read the ingress class from the Context instead of hardcoding nginx ([1b01089](https://github.com/OKDP/community-packages/commit/1b01089ffe1340a32a2479ff3d434eef5cfcc8ff))
+
 ## [1.1.0](https://github.com/OKDP/community-packages/compare/ollama-ui/v1.0.0...ollama-ui/v1.1.0) (2026-10-02)
 
 
