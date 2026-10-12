@@ -1,0 +1,87 @@
+#
+# Copyright 2026 The OKDP Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+
+apiVersion: v1alpha1
+name: openbao
+tag: 2.7.1-1.0.0
+protected: false
+description: |
+  OpenBao in dev mode, a secret backend for a SecretStore. In memory, root token "root",
+  no isolation between projects. For evaluation only, never in production.
+usage:
+  text: |
+    {{- $ns := .Release.spec.targetNamespace -}}
+    {{- $host := .Parameters.ingressHost | default (printf "%s-%s" (trimPrefix (printf "%s-" $ns) .Release.metadata.name) $ns) -}}
+    OpenBao (dev mode, root token "root", emptied on every restart).
+    In-cluster address : http://{{ .Release.metadata.name }}.{{ $ns }}:8200
+    {{- if .Parameters.ingressEnabled }}
+    Public address     : https://{{ $host }}.{{ .Context.ingress.suffix }}
+    {{- end }}
+schema:
+  parameters:
+    properties:
+      ingressEnabled: { type: boolean, default: true, title: "Server | Ingress | | order:1" }
+      ingressHost: { type: string, default: "", title: "Server | Ingress host | | order:2 columns:2", description: "Host name, the platform ingress suffix is appended. Empty: <instance>-<project>." }
+      uiEnabled: { type: boolean, default: true, title: "Server | Web UI service | | order:3" }
+  context:
+    properties:
+      certificateIssuers:
+        required: true
+        properties:
+          selfSigned:
+            required: true
+            properties:
+              name: { type: string, required: true }
+      ingress:
+        required: true
+        properties:
+          suffix: { type: string, required: true }
+          className: { type: string, default: nginx }
+modules:
+  - name: main
+    timeout: 10m
+    source:
+      helmRepository:
+        url: https://openbao.github.io/openbao-helm
+        chart: openbao
+        version: "0.30.3"
+    values: |
+      {{- $ns := .Release.spec.targetNamespace -}}
+      {{- $base := .Parameters.ingressHost | default (printf "%s-%s" (trimPrefix (printf "%s-" $ns) .Release.metadata.name) $ns) -}}
+      {{- $host := printf "%s.%s" $base .Context.ingress.suffix -}}
+      fullnameOverride: {{ .Release.metadata.name }}
+      injector:
+        enabled: false
+      server:
+        dev:
+          enabled: true
+        ingress:
+          enabled: {{ .Parameters.ingressEnabled }}
+          ingressClassName: {{ .Context.ingress.className | default "nginx" }}
+          annotations:
+            cert-manager.io/cluster-issuer: {{ .Context.certificateIssuers.selfSigned.name }}
+          hosts:
+            - host: {{ $host }}
+              paths: []
+          tls:
+            - secretName: {{ .Release.metadata.name }}-tls
+              hosts:
+                - {{ $host }}
+      ui:
+        enabled: {{ .Parameters.uiEnabled }}
+roles: []
+dependencies:
+  - ingress
