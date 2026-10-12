@@ -15,6 +15,7 @@ artifacts. Deployment (releases, contexts) belongs to the consuming environment,
 | [`rustfs`](./packages/services/rustfs/rustfs.yaml) | S3-compatible object storage | Binds the OKDP `defaultStorage` provider contract |
 | [`ollama`](./packages/services/ollama/ollama.yaml) | Local LLM inference server | CPU mode, no GPU; the model is a parameter |
 | [`ollama-ui`](./packages/services/ollama-ui/ollama-ui.yaml) | Chat interface for `ollama` | Points at an `ollama` release in the same project |
+| [`openbao`](./packages/services/openbao/openbao.yaml) | Secret backend for External Secrets (`vault` provider) | Dev mode only, see [limits](#openbao-limits) |
 
 ## Structure
 
@@ -23,6 +24,7 @@ packages/
 └── services/
     ├── ollama/
     ├── ollama-ui/
+    ├── openbao/
     └── rustfs/
 community-packages-values.yaml # OCI publish target (packageRepository), read by CI
 ```
